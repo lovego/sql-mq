@@ -1,0 +1,12 @@
+bou.ke/monkey v1.0.2 h1:kWcnsrCNUatbxncxR/ThdYqbytgOIArtYWqcQLQzKLI=
+bou.ke/monkey v1.0.2/go.mod h1:OqickVX3tNx6t33n1xvtTtu85YN5s6cKwVug+oHMaIA=
+github.com/lib/pq v1.10.1 h1:6VXZrLU0jHBYyAqrSPa+MgPfnSvTPuMgK+k0o5kVFWo=
+github.com/lib/pq v1.10.1/go.mod h1:AlVN5x4E4T544tWzH6hKfbfQvm3HdbOxrmggDNAPY9o=
+github.com/lovego/errs v0.0.0-20200914124519-002655aaf593 h1:r7226H6FsObjjedOSIVC8iF0ueJBObYsF8oukgAQ6m0=
+github.com/lovego/errs v0.0.0-20200914124519-002655aaf593/go.mod h1:FfIOS6S5g1NZl4X4jGnY5DifiOaKOpv4N9wZXUKej8k=
+github.com/lovego/logger v0.0.0-20200804041111-ab21de5d5a74 h1:rj+TqKUL0gV7EKww+ZN/PYYlMR62SZCX0qFrkVyWLSc=
+github.com/lovego/logger v0.0.0-20200804041111-ab21de5d5a74/go.mod h1:uAHp76Nknc9tJbA2XKYQCUYqQR82udPAItcs/BtQDn4=
+github.com/lovego/maps v0.0.0-20190404131308-5c14106deb1f h1:ddyIZqaD9In5hDtB5eDgUr04JjBp0cpN3XPzS22kREc=
+github.com/lovego/maps v0.0.0-20190404131308-5c14106deb1f/go.mod h1:7hsF4cgdpLGo+c6/0bQAKi14FnRIqmFu2bfAHKdQuG8=
+github.com/lovego/tracer v0.0.0-20200207073659-f9fecb73b19f h1:ojEisTS/YwLIB82lLXE62LqIDAreD37kFJdg9b+Olmc=
+github.com/lovego/tracer v0.0.0-20200207073659-f9fecb73b19f/go.mod h1:aKGpzdC+2JKu/90fy95JH9Ndaske6mVUEpwMW6rsvMo=
