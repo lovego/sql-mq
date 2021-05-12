@@ -2,7 +2,7 @@
 A message queue based on `"database/sql".DB`.
 
 [![Build Status](https://github.com/lovego/sqlmq/actions/workflows/go.yml/badge.svg)](https://github.com/lovego/sqlmq/actions/workflows/go.yml)
-[![Coverage Status](https://coveralls.io/repos/github/lovego/sql-mq/badge.svg?branch=master)](https://coveralls.io/github/lovego/sql-mq?branch=master)
+[![Coverage Status](https://coveralls.io/repos/github/lovego/sql-mq/badge.svg)](https://coveralls.io/github/lovego/sql-mq)
 [![Go Report Card](https://goreportcard.com/badge/github.com/lovego/sqlmq)](https://goreportcard.com/report/github.com/lovego/sqlmq)
 [![Documentation](https://pkg.go.dev/badge/github.com/lovego/sqlmq)](https://pkg.go.dev/github.com/lovego/sqlmq)
 
