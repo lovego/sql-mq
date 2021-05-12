@@ -13,7 +13,7 @@ on:
         description: 'Run the build with tmate debug'
 
 jobs:
-  build:
+  test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -46,6 +46,5 @@ jobs:
       uses: shogo82148/actions-goveralls@v1
       with:
         path-to-profile: profile.cov
-        flag-name: go${{ matrix.go }}
-        parallel: true
+      if: ${{ matrix.go == '1.16' }}
 
