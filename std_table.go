@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	statusWait    = ""
+	statusWaiting = "waiting"
 	statusDone    = "done"
 	statusGivenUp = "givenUp"
 
@@ -26,7 +26,7 @@ type StdMessage struct {
 	Status    string
 	CreatedAt time.Time
 	TryCount  uint16
-	RetryAt   time.Time `json:",omitempty"`
+	RetryAt   time.Time
 }
 
 func (msg *StdMessage) QueueName() string {
@@ -37,7 +37,7 @@ func (msg *StdMessage) ConsumeAt() time.Time {
 	return msg.RetryAt
 }
 
-func StdTable(db *sql.DB, name string) Table {
+func NewStdTable(db *sql.DB, name string) *StdTable {
 	var createSql = fmt.Sprintf(`
 CREATE TABLE IF NOT EXISTS %s (
 	id            bigserial    NOT NULL PRIMARY KEY,
@@ -50,29 +50,29 @@ CREATE TABLE IF NOT EXISTS %s (
 );
 CREATE INDEX IF NOT EXISTS %s_retry_at ON %s (retry_at)
 WHERE status = '%s'
-`, name, name, name, statusWait,
+`, name, name, name, statusWaiting,
 	)
 	if _, err := db.Exec(createSql); err != nil {
 		log.Panic(err)
 	}
-	return &stdTable{name: name}
+	return &StdTable{name: name}
 }
 
-type stdTable struct {
+type StdTable struct {
 	name               string
 	queues             []string
 	earliestMessageSql string
 	mutex              sync.RWMutex
 }
 
-func (table *stdTable) SetQueues(queues []string) {
+func (table *StdTable) SetQueues(queues []string) {
 	table.mutex.Lock()
 	defer table.mutex.Unlock()
 	table.queues = queues
 	table.earliestMessageSql = ""
 }
 
-func (table *stdTable) EarliestMessage(tx *sql.Tx) (Message, error) {
+func (table *StdTable) EarliestMessage(tx *sql.Tx) (Message, error) {
 	row := StdMessage{}
 	querysql := table.getEarliestMessageSql()
 	if err := tx.QueryRow(querysql).Scan(
@@ -85,7 +85,7 @@ func (table *stdTable) EarliestMessage(tx *sql.Tx) (Message, error) {
 	return &row, nil
 }
 
-func (table *stdTable) getEarliestMessageSql() string {
+func (table *StdTable) getEarliestMessageSql() string {
 	table.mutex.RLock()
 	if table.earliestMessageSql == "" {
 		var queues []string
@@ -101,7 +101,7 @@ func (table *stdTable) getEarliestMessageSql() string {
 		LIMIT 1
 		FOR UPDATE SKIP LOCKED
 		`,
-			table.name, strings.Join(queues, ","), statusWait,
+			table.name, strings.Join(queues, ","), statusWaiting,
 		)
 		table.mutex.RUnlock()
 
@@ -115,7 +115,7 @@ func (table *stdTable) getEarliestMessageSql() string {
 	return table.earliestMessageSql
 }
 
-func (table *stdTable) MarkSuccess(tx *sql.Tx, msg Message) error {
+func (table *StdTable) MarkSuccess(tx *sql.Tx, msg Message) error {
 	sql := fmt.Sprintf(`
 	UPDATE %s
 	SET status = '%s', try_count = try_count+1, retry_at = '%s'
@@ -129,7 +129,7 @@ func (table *stdTable) MarkSuccess(tx *sql.Tx, msg Message) error {
 	return err
 }
 
-func (table *stdTable) MarkRetry(db *sql.DB, msg Message, retryAfter time.Duration) error {
+func (table *StdTable) MarkRetry(db *sql.DB, msg Message, retryAfter time.Duration) error {
 	sql := fmt.Sprintf(`
 	UPDATE %s
 	SET try_count = try_count + 1,  retry_at = '%s'
@@ -143,7 +143,7 @@ func (table *stdTable) MarkRetry(db *sql.DB, msg Message, retryAfter time.Durati
 	return err
 }
 
-func (table *stdTable) MarkGivenUp(db *sql.DB, msg Message) error {
+func (table *StdTable) MarkGivenUp(db *sql.DB, msg Message) error {
 	sql := fmt.Sprintf(`
 	UPDATE %s
 	SET status = '%s', try_count = try_count + 1, retry_at = '%s'
@@ -157,7 +157,7 @@ func (table *stdTable) MarkGivenUp(db *sql.DB, msg Message) error {
 	return err
 }
 
-func (table *stdTable) ProduceMessage(tx *sql.Tx, msg Message) error {
+func (table *StdTable) ProduceMessage(tx *sql.Tx, msg Message) error {
 	m := msg.(*StdMessage)
 	jsonData, ok := m.Data.([]byte)
 	if !ok {
@@ -168,6 +168,9 @@ func (table *stdTable) ProduceMessage(tx *sql.Tx, msg Message) error {
 		}
 	}
 
+	if m.Status == "" {
+		m.Status = statusWaiting
+	}
 	if m.CreatedAt.IsZero() {
 		m.CreatedAt = time.Now()
 	}

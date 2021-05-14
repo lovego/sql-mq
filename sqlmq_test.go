@@ -19,7 +19,7 @@ func ExampleSqlMQ() {
 	}
 	mq := &SqlMQ{
 		DB:    db,
-		Table: StdTable(db, "sqlmq"),
+		Table: NewStdTable(db, "sqlmq"),
 	}
 
 	mq.Register("test", func(ctx context.Context, tx *sql.Tx, msg Message) (time.Duration, error) {
