@@ -33,6 +33,12 @@ type SqlMQ struct {
 	consumeNotify chan struct{}
 }
 
+type DBOrTx interface {
+	Query(sql string, args ...interface{}) (*sql.Rows, error)
+	QueryRow(sql string, args ...interface{}) *sql.Row
+	Exec(sql string, args ...interface{}) (sql.Result, error)
+}
+
 type Table interface {
 	// Set the queues for EarliestMessage. This method must be concurrency safe.
 	SetQueues(queues []string)
@@ -40,19 +46,22 @@ type Table interface {
 	// Get the earliest message in the "SetQueues" which have not been "MarkSuccess".
 	// The "earliest" means smallest "ConsumeAt".
 	// If no such message, return a nil interface.
+	// The tx must be used to exclusively lock (SELECT FOR UPDATE) the returned message.
+	// Don't commit or rollback the tx.
 	EarliestMessage(tx *sql.Tx) (Message, error)
 
-	// mark a message as consumed successfully
+	// Mark a message as consumed successfully.
+	// The tx must be used to update the message. Don't commit or rollback the tx.
 	MarkSuccess(tx *sql.Tx, msg Message) error
 
 	// mark a message should be retried after a time period
-	MarkRetry(db *sql.DB, msg Message, retryAfter time.Duration) error
+	MarkRetry(db DBOrTx, msg Message, retryAfter time.Duration) error
 
 	// mark a message as given up
-	MarkGivenUp(db *sql.DB, msg Message) error
+	MarkGivenUp(db DBOrTx, msg Message) error
 
 	// produce a message.
-	ProduceMessage(tx *sql.Tx, msg Message) error
+	ProduceMessage(db DBOrTx, msg Message) error
 }
 
 type Message interface {
@@ -114,11 +123,16 @@ func (mq *SqlMQ) TriggerConsume() {
 	}
 }
 
+// Produce a meesage. tx can be nil.
 func (mq *SqlMQ) Produce(tx *sql.Tx, msg Message) error {
 	if _, err := mq.handlerOf(msg); err != nil {
 		return err
 	}
-	if err := mq.Table.ProduceMessage(tx, msg); err != nil {
+	var db DBOrTx = mq.DB
+	if tx != nil {
+		db = tx
+	}
+	if err := mq.Table.ProduceMessage(db, msg); err != nil {
 		return err
 	}
 	mq.TriggerConsume()

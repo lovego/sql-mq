@@ -3,7 +3,6 @@ package sqlmq
 import (
 	"context"
 	"database/sql"
-	"log"
 	"time"
 
 	"github.com/lovego/logger"
@@ -11,7 +10,7 @@ import (
 
 func (mq *SqlMQ) Consume() {
 	if err := mq.validate(); err != nil {
-		log.Panic(err)
+		panic(time.Now().Format(time.RFC3339Nano) + " " + err.Error())
 	}
 
 	idleWait, errorWait := mq.getWaitTime()

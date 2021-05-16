@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -60,18 +59,13 @@ func ExampleSqlMQ() {
 func getDB() *sql.DB {
 	db, err := sql.Open("postgres", "postgres://postgres:postgres@localhost/postgres?sslmode=disable")
 	if err != nil {
-		log.Panic(err)
+		panic(err)
 	}
 	return db
 }
 
 func produce(mq *SqlMQ, data string) {
-	if tx, err := mq.DB.BeginTx(context.Background(), nil); err != nil {
+	if err := mq.Produce(nil, &StdMessage{Queue: "test", Data: data}); err != nil {
 		panic(err)
-	} else {
-		if err := mq.Produce(tx, &StdMessage{Queue: "test", Data: data}); err != nil {
-			panic(err)
-		}
-		tx.Commit()
 	}
 }

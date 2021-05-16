@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -53,7 +52,7 @@ WHERE status = '%s'
 `, name, name, name, statusWaiting,
 	)
 	if _, err := db.Exec(createSql); err != nil {
-		log.Panic(err)
+		panic(time.Now().Format(time.RFC3339Nano) + " " + err.Error())
 	}
 	return &StdTable{name: name}
 }
@@ -115,7 +114,7 @@ func (table *StdTable) getEarliestMessageSql() string {
 	return table.earliestMessageSql
 }
 
-func (table *StdTable) MarkSuccess(tx *sql.Tx, msg Message) error {
+func (table *StdTable) MarkSuccess(tx *sql.Tx, message Message) error {
 	sql := fmt.Sprintf(`
 	UPDATE %s
 	SET status = '%s', try_count = try_count+1, retry_at = '%s'
@@ -123,13 +122,13 @@ func (table *StdTable) MarkSuccess(tx *sql.Tx, msg Message) error {
 	`,
 		table.name,
 		statusDone, time.Now().Format(rfc3339Micro),
-		msg.(*StdMessage).Id,
+		message.(*StdMessage).Id,
 	)
 	_, err := tx.Exec(sql)
 	return err
 }
 
-func (table *StdTable) MarkRetry(db *sql.DB, msg Message, retryAfter time.Duration) error {
+func (table *StdTable) MarkRetry(db DBOrTx, message Message, retryAfter time.Duration) error {
 	sql := fmt.Sprintf(`
 	UPDATE %s
 	SET try_count = try_count + 1,  retry_at = '%s'
@@ -137,13 +136,13 @@ func (table *StdTable) MarkRetry(db *sql.DB, msg Message, retryAfter time.Durati
 	`,
 		table.name,
 		time.Now().Add(retryAfter).Format(rfc3339Micro),
-		msg.(*StdMessage).Id,
+		message.(*StdMessage).Id,
 	)
 	_, err := db.Exec(sql)
 	return err
 }
 
-func (table *StdTable) MarkGivenUp(db *sql.DB, msg Message) error {
+func (table *StdTable) MarkGivenUp(db DBOrTx, message Message) error {
 	sql := fmt.Sprintf(`
 	UPDATE %s
 	SET status = '%s', try_count = try_count + 1, retry_at = '%s'
@@ -151,31 +150,32 @@ func (table *StdTable) MarkGivenUp(db *sql.DB, msg Message) error {
 	`,
 		table.name,
 		statusGivenUp, time.Now().Format(rfc3339Micro),
-		msg.(*StdMessage).Id,
+		message.(*StdMessage).Id,
 	)
 	_, err := db.Exec(sql)
 	return err
 }
 
-func (table *StdTable) ProduceMessage(tx *sql.Tx, msg Message) error {
-	m := msg.(*StdMessage)
-	jsonData, ok := m.Data.([]byte)
+// if ProduceMessage runs succussfully, message id is set message(which is *StdMessage).
+func (table *StdTable) ProduceMessage(db DBOrTx, message Message) error {
+	msg := message.(*StdMessage)
+	jsonData, ok := msg.Data.([]byte)
 	if !ok {
-		if data, err := json.Marshal(m.Data); err != nil {
+		if data, err := json.Marshal(msg.Data); err != nil {
 			return err
 		} else {
 			jsonData = []byte(data)
 		}
 	}
 
-	if m.Status == "" {
-		m.Status = statusWaiting
+	if msg.Status == "" {
+		msg.Status = statusWaiting
 	}
-	if m.CreatedAt.IsZero() {
-		m.CreatedAt = time.Now()
+	if msg.CreatedAt.IsZero() {
+		msg.CreatedAt = time.Now()
 	}
-	if m.RetryAt.IsZero() {
-		m.RetryAt = m.CreatedAt
+	if msg.RetryAt.IsZero() {
+		msg.RetryAt = msg.CreatedAt
 	}
 
 	sql := fmt.Sprintf(`
@@ -183,13 +183,17 @@ func (table *StdTable) ProduceMessage(tx *sql.Tx, msg Message) error {
 		(queue, data, status, created_at, try_count, retry_at)
 	VALUES
 	    (%s,    %s,   %s,     '%s',       %d,        '%s')
+	RETURNING id
 	`,
 		table.name,
-		quote(m.Queue), quote(string(jsonData)), quote(m.Status),
-		m.CreatedAt.Format(rfc3339Micro), m.TryCount, m.RetryAt.Format(rfc3339Micro),
+		quote(msg.Queue), quote(string(jsonData)), quote(msg.Status),
+		msg.CreatedAt.Format(rfc3339Micro), msg.TryCount, msg.RetryAt.Format(rfc3339Micro),
 	)
-	_, err := tx.Exec(sql)
-	return err
+	return db.QueryRow(sql).Scan(&msg.Id)
+}
+
+func (table *StdTable) Name() string {
+	return table.name
 }
 
 // quote a string, removing all zero byte('\000') in it.
