@@ -83,41 +83,46 @@ func (mq *SqlMQ) consumeOne(idleWait time.Duration) (wait time.Duration, err err
 func (mq *SqlMQ) handle(ctx context.Context, cancel func(), tx *sql.Tx, msg Message) (
 	retryAfter time.Duration, err error,
 ) {
+	var canCommit bool
 	defer func() {
-		if err != nil {
-			// Do this before transaction released the "FOR UPDATE" lock.
-			go func() {
-				if retryAfter >= 0 {
-					if err2 := mq.Table.MarkRetry(mq.DB, msg, retryAfter); err2 != nil {
-						mq.Logger.Error(err2)
-					} else {
-						mq.TriggerConsume()
-					}
-				} else {
-					if err2 := mq.Table.MarkGivenUp(mq.DB, msg); err2 != nil {
-						mq.Logger.Error(err2)
-					}
-				}
-			}()
-			// Wait the goroutine above to be ready to preempt the lock.
-			// Reduce the rate that `EarliestMessage` got the lock and consume this message again.
-			time.Sleep(100 * time.Millisecond)
+		if err == nil || canCommit {
+			err = tx.Commit()
+		} else {
 			if err2 := tx.Rollback(); err2 != nil {
 				mq.Logger.Error(err2)
 			}
-		} else {
-			err = tx.Commit()
 		}
 		cancel()
 	}()
 
 	handler, err := mq.handlerOf(msg)
 	if err == nil {
-		if retryAfter, err = handler(ctx, tx, msg); err == nil {
+		if retryAfter, canCommit, err = handler(ctx, tx, msg); err == nil {
 			err = mq.Table.MarkSuccess(tx, msg)
+		} else if canCommit {
+			mq.markFail(tx, msg, retryAfter)
+		} else {
+			// Do this before transaction released the "FOR UPDATE" lock.
+			go mq.markFail(mq.DB, msg, retryAfter)
+			// Wait the goroutine above to be ready to preempt the lock before rollback release the lock.
+			// Reduce the rate that `EarliestMessage` got the lock and consume this message again.
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
 	return
+}
+func (mq *SqlMQ) markFail(db DBOrTx, msg Message, retryAfter time.Duration) {
+	if retryAfter >= 0 {
+		if err := mq.Table.MarkRetry(mq.DB, msg, retryAfter); err != nil {
+			mq.Logger.Error(err)
+		} else {
+			mq.TriggerConsume()
+		}
+	} else {
+		if err := mq.Table.MarkGivenUp(mq.DB, msg); err != nil {
+			mq.Logger.Error(err)
+		}
+	}
 }
 
 func (mq *SqlMQ) beginTx() (*sql.Tx, func(), error) {

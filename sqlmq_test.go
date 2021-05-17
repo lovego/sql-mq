@@ -21,25 +21,25 @@ func ExampleSqlMQ() {
 		Table: NewStdTable(db, "sqlmq"),
 	}
 
-	mq.Register("test", func(ctx context.Context, tx *sql.Tx, msg Message) (time.Duration, error) {
+	mq.Register("test", func(ctx context.Context, tx *sql.Tx, msg Message) (time.Duration, bool, error) {
 		m := msg.(*StdMessage)
 		var data string
 		if err := json.Unmarshal(m.Data.([]byte), &data); err != nil {
-			return 0, err
+			return 0, true, err
 		}
 		m.Data = data
 		fmt.Println(data, m.TryCount)
 		switch m.Data {
 		case "success":
-			return 0, nil
+			return 0, true, nil
 		case "retry":
 			if m.TryCount < 2 {
-				return time.Second, errors.New("error happened")
+				return time.Second, false, errors.New("error happened")
 			} else {
-				return 0, nil
+				return 0, false, nil
 			}
 		default:
-			return -1, errors.New("given up")
+			return -1, false, errors.New("given up")
 		}
 	})
 	produce(mq, "success")

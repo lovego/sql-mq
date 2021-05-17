@@ -70,13 +70,15 @@ type Message interface {
 	ConsumeAt() time.Time
 }
 
-// On successful handling, a nil error should be returned, and retryAfter is ignored.
+// On successful handling, a nil error should be returned, retryAfter and canCommit is ignored.
 // On failing handling, a non nil error should be returned, and retryAfter means:
 // 1. if retryAfter is positive, means try again that time period later;
 // 2. if retryAfter is zero,     means try again immediately;
 // 3. if retryAfter is negative, means give up this message, don't try again.
+// canCommit means when an error is returned, can the transaction be committed or must be rollbacked.
+// If canCommit is false, this transaction is rollbacked, and another statements is executed to update retry time.
 type Handler func(ctx context.Context, tx *sql.Tx, msg Message) (
-	retryAfter time.Duration, err error,
+	retryAfter time.Duration, canCommit bool, err error,
 )
 
 func (mq *SqlMQ) Register(queueName string, handler Handler) {
