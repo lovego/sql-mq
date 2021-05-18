@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/lovego/errs"
 )
 
 const (
@@ -79,7 +81,7 @@ func (table *StdTable) EarliestMessage(tx *sql.Tx) (Message, error) {
 	); err == sql.ErrNoRows {
 		return nil, nil
 	} else if err != nil {
-		return nil, err
+		return nil, errs.Trace(err)
 	}
 	return &row, nil
 }
@@ -124,8 +126,10 @@ func (table *StdTable) MarkSuccess(tx *sql.Tx, message Message) error {
 		statusDone, time.Now().Format(rfc3339Micro),
 		message.(*StdMessage).Id,
 	)
-	_, err := tx.Exec(sql)
-	return err
+	if _, err := tx.Exec(sql); err != nil {
+		return errs.Trace(err)
+	}
+	return nil
 }
 
 func (table *StdTable) MarkRetry(db DBOrTx, message Message, retryAfter time.Duration) error {
@@ -138,8 +142,10 @@ func (table *StdTable) MarkRetry(db DBOrTx, message Message, retryAfter time.Dur
 		time.Now().Add(retryAfter).Format(rfc3339Micro),
 		message.(*StdMessage).Id,
 	)
-	_, err := db.Exec(sql)
-	return err
+	if _, err := db.Exec(sql); err != nil {
+		return errs.Trace(err)
+	}
+	return nil
 }
 
 func (table *StdTable) MarkGivenUp(db DBOrTx, message Message) error {
@@ -152,8 +158,10 @@ func (table *StdTable) MarkGivenUp(db DBOrTx, message Message) error {
 		statusGivenUp, time.Now().Format(rfc3339Micro),
 		message.(*StdMessage).Id,
 	)
-	_, err := db.Exec(sql)
-	return err
+	if _, err := db.Exec(sql); err != nil {
+		return errs.Trace(err)
+	}
+	return nil
 }
 
 // if ProduceMessage runs succussfully, message id is set message(which is *StdMessage).
@@ -189,7 +197,10 @@ func (table *StdTable) ProduceMessage(db DBOrTx, message Message) error {
 		quote(msg.Queue), quote(string(jsonData)), quote(msg.Status),
 		msg.CreatedAt.Format(rfc3339Micro), msg.TryCount, msg.RetryAt.Format(rfc3339Micro),
 	)
-	return db.QueryRow(sql).Scan(&msg.Id)
+	if err := db.QueryRow(sql).Scan(&msg.Id); err != nil {
+		return errs.Trace(err)
+	}
+	return nil
 }
 
 func (table *StdTable) Name() string {
