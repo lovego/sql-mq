@@ -93,7 +93,7 @@ func (mq *SqlMQ) Register(queueName string, handler Handler) error {
 	existingHandler := mq.queues[queueName]
 	mq.mutex.RUnlock()
 	if existingHandler != nil {
-		return fmt.Errorf("queue %s aready registerd", queueName)
+		return fmt.Errorf("queue %s aready registered", queueName)
 	}
 
 	mq.mutex.Lock()
@@ -158,10 +158,10 @@ func (mq *SqlMQ) Produce(tx *sql.Tx, msg Message) error {
 
 func (mq *SqlMQ) validate() error {
 	if mq.DB == nil {
-		return errors.New("SqlMQ.DB must not be nil.")
+		return errors.New("SqlMQ.DB must not be nil")
 	}
 	if mq.Table == nil {
-		return errors.New("SqlMQ.Table must not be nil.")
+		return errors.New("SqlMQ.Table must not be nil")
 	}
 	if mq.Logger == nil {
 		mq.Logger = logger.New(os.Stderr)
