@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"sync"
 	"time"
@@ -26,6 +27,9 @@ type SqlMQ struct {
 	// If TxTimeout <= 0, the default value one minute is used.
 	TxTimeout time.Duration
 
+	// The time interval to clean successfully consumed messages.
+	CleanInterval time.Duration
+
 	queues map[string]Handler
 	mutex  sync.RWMutex
 
@@ -34,9 +38,9 @@ type SqlMQ struct {
 }
 
 type DBOrTx interface {
-	Query(sql string, args ...interface{}) (*sql.Rows, error)
-	QueryRow(sql string, args ...interface{}) *sql.Row
-	Exec(sql string, args ...interface{}) (sql.Result, error)
+	QueryContext(ctx context.Context, sql string, args ...interface{}) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, sql string, args ...interface{}) *sql.Row
+	ExecContext(ctx context.Context, sql string, args ...interface{}) (sql.Result, error)
 }
 
 type Table interface {
@@ -62,6 +66,9 @@ type Table interface {
 
 	// produce a message.
 	ProduceMessage(db DBOrTx, msg Message) error
+	// clean successfully consumed messages, may keep a duration after consumed for debugging.
+	// return the number of cleaned messages.
+	CleanMessages(db *sql.DB) (int64, error)
 }
 
 type Message interface {
@@ -81,7 +88,14 @@ type Handler func(ctx context.Context, tx *sql.Tx, msg Message) (
 	retryAfter time.Duration, canCommit bool, err error,
 )
 
-func (mq *SqlMQ) Register(queueName string, handler Handler) {
+func (mq *SqlMQ) Register(queueName string, handler Handler) error {
+	mq.mutex.RLock()
+	existingHandler := mq.queues[queueName]
+	mq.mutex.RUnlock()
+	if existingHandler != nil {
+		return fmt.Errorf("queue %s aready registerd", queueName)
+	}
+
 	mq.mutex.Lock()
 	if mq.queues == nil {
 		mq.queues = make(map[string]Handler)
@@ -100,6 +114,7 @@ func (mq *SqlMQ) Register(queueName string, handler Handler) {
 
 	mq.Table.SetQueues(queues)
 	mq.TriggerConsume()
+	return nil
 }
 
 func (mq *SqlMQ) noQueues() bool {

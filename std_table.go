@@ -1,6 +1,7 @@
 package sqlmq
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -38,7 +39,20 @@ func (msg *StdMessage) ConsumeAt() time.Time {
 	return msg.RetryAt
 }
 
-func NewStdTable(db *sql.DB, name string) *StdTable {
+// NewStdTable create a standard `sqlmq.Table` instance.
+// db: db use to create table and index.
+// name: database table name.
+// keep: keep a successfully consumed message for how long before delete it.
+func NewStdTable(db *sql.DB, name string, keep time.Duration) *StdTable {
+	createTable(db, name)
+	createIndex(db, name)
+	if keep < 0 {
+		keep = 24 * time.Hour
+	}
+	return &StdTable{name: name, keep: keep}
+}
+
+func createTable(db *sql.DB, name string) {
 	var createSql = fmt.Sprintf(`
 CREATE TABLE IF NOT EXISTS %s (
 	id            bigserial    NOT NULL PRIMARY KEY,
@@ -49,18 +63,30 @@ CREATE TABLE IF NOT EXISTS %s (
 	retry_at      timestamptz  NOT NULL,
 	data          jsonb        NOT NULL
 );
-CREATE INDEX IF NOT EXISTS %s_retry_at ON %s (retry_at)
-WHERE status = '%s'
-`, name, name, name, statusWaiting,
+`, name,
 	)
-	if _, err := db.Exec(createSql); err != nil {
+	ctx, cancel := sqlTimeout()
+	defer cancel()
+	if _, err := db.ExecContext(ctx, createSql); err != nil {
 		panic(time.Now().Format(time.RFC3339Nano) + " " + err.Error())
 	}
-	return &StdTable{name: name}
 }
 
+func createIndex(db *sql.DB, name string) {
+	var createSql = fmt.Sprintf(
+		`CREATE INDEX CONCURRENTLY IF NOT EXISTS %s_retry_at ON %s (retry_at)`, name, name,
+	)
+	ctx, cancel := sqlTimeout()
+	defer cancel()
+	if _, err := db.ExecContext(ctx, createSql); err != nil {
+		panic(time.Now().Format(time.RFC3339Nano) + " " + err.Error())
+	}
+}
+
+// StdTable is a standard `sqlmq.Table` implementation.
 type StdTable struct {
 	name               string
+	keep               time.Duration
 	queues             []string
 	earliestMessageSql string
 	mutex              sync.RWMutex
@@ -76,7 +102,9 @@ func (table *StdTable) SetQueues(queues []string) {
 func (table *StdTable) EarliestMessage(tx *sql.Tx) (Message, error) {
 	row := StdMessage{}
 	querysql := table.getEarliestMessageSql()
-	if err := tx.QueryRow(querysql).Scan(
+	ctx, cancel := sqlTimeout()
+	defer cancel()
+	if err := tx.QueryRowContext(ctx, querysql).Scan(
 		&row.Id, &row.Queue, &row.Data, &row.Status, &row.CreatedAt, &row.TryCount, &row.RetryAt,
 	); err == sql.ErrNoRows {
 		return nil, nil
@@ -126,7 +154,9 @@ func (table *StdTable) MarkSuccess(tx *sql.Tx, message Message) error {
 		statusDone, time.Now().Format(rfc3339Micro),
 		message.(*StdMessage).Id,
 	)
-	if _, err := tx.Exec(sql); err != nil {
+	ctx, cancel := sqlTimeout()
+	defer cancel()
+	if _, err := tx.ExecContext(ctx, sql); err != nil {
 		return errs.Trace(err)
 	}
 	return nil
@@ -142,7 +172,9 @@ func (table *StdTable) MarkRetry(db DBOrTx, message Message, retryAfter time.Dur
 		time.Now().Add(retryAfter).Format(rfc3339Micro),
 		message.(*StdMessage).Id,
 	)
-	if _, err := db.Exec(sql); err != nil {
+	ctx, cancel := sqlTimeout()
+	defer cancel()
+	if _, err := db.ExecContext(ctx, sql); err != nil {
 		return errs.Trace(err)
 	}
 	return nil
@@ -158,7 +190,9 @@ func (table *StdTable) MarkGivenUp(db DBOrTx, message Message) error {
 		statusGivenUp, time.Now().Format(rfc3339Micro),
 		message.(*StdMessage).Id,
 	)
-	if _, err := db.Exec(sql); err != nil {
+	ctx, cancel := sqlTimeout()
+	defer cancel()
+	if _, err := db.ExecContext(ctx, sql); err != nil {
 		return errs.Trace(err)
 	}
 	return nil
@@ -197,14 +231,36 @@ func (table *StdTable) ProduceMessage(db DBOrTx, message Message) error {
 		quote(msg.Queue), quote(string(jsonData)), quote(msg.Status),
 		msg.CreatedAt.Format(rfc3339Micro), msg.TryCount, msg.RetryAt.Format(rfc3339Micro),
 	)
-	if err := db.QueryRow(sql).Scan(&msg.Id); err != nil {
+	ctx, cancel := sqlTimeout()
+	defer cancel()
+	if err := db.QueryRowContext(ctx, sql).Scan(&msg.Id); err != nil {
 		return errs.Trace(err)
 	}
 	return nil
 }
 
+func (table *StdTable) CleanMessages(db *sql.DB) (int64, error) {
+	sql := fmt.Sprintf(`
+	DELETE FROM %s
+	WHERE status = '%s' AND retry_at < '%s'
+	`,
+		table.name, statusDone, time.Now().Add(-table.keep).Format(rfc3339Micro),
+	)
+	if result, err := db.Exec(sql); err != nil {
+		return 0, errs.Trace(err)
+	} else if n, err := result.RowsAffected(); err != nil {
+		return 0, errs.Trace(err)
+	} else {
+		return n, nil
+	}
+}
+
 func (table *StdTable) Name() string {
 	return table.name
+}
+
+func sqlTimeout() (context.Context, func()) {
+	return context.WithTimeout(context.Background(), 10*time.Second)
 }
 
 // quote a string, removing all zero byte('\000') in it.

@@ -17,8 +17,9 @@ func ExampleSqlMQ() {
 		panic(err)
 	}
 	mq := &SqlMQ{
-		DB:    db,
-		Table: NewStdTable(db, "sqlmq"),
+		DB:            db,
+		Table:         NewStdTable(db, "sqlmq", time.Hour),
+		CleanInterval: time.Hour,
 	}
 
 	mq.Register("test", func(ctx context.Context, tx *sql.Tx, msg Message) (time.Duration, bool, error) {
@@ -33,10 +34,13 @@ func ExampleSqlMQ() {
 		case "success":
 			return 0, true, nil
 		case "retry":
-			if m.TryCount < 2 {
+			switch m.TryCount {
+			case 0:
 				return time.Second, false, errors.New("error happened")
-			} else {
-				return 0, false, nil
+			case 1:
+				return time.Second, true, errors.New("error happened")
+			default:
+				return 0, true, nil
 			}
 		default:
 			return -1, false, errors.New("given up")
@@ -47,7 +51,7 @@ func ExampleSqlMQ() {
 	produce(mq, "given up")
 
 	go mq.Consume()
-	time.Sleep(3 * time.Second)
+	time.Sleep(5 * time.Second)
 	// Output:
 	// success 0
 	// retry 0

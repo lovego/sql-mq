@@ -12,6 +12,9 @@ func (mq *SqlMQ) Consume() {
 	if err := mq.validate(); err != nil {
 		panic(time.Now().Format(time.RFC3339Nano) + " " + err.Error())
 	}
+	if mq.CleanInterval > 0 {
+		go mq.clean()
+	}
 
 	idleWait, errorWait := mq.getWaitTime()
 	mq.consumeNotify = make(chan struct{}, 1)
@@ -85,8 +88,12 @@ func (mq *SqlMQ) handle(ctx context.Context, cancel func(), tx *sql.Tx, msg Mess
 ) {
 	var canCommit bool
 	defer func() {
-		if err == nil || canCommit {
+		if err == nil {
 			err = tx.Commit()
+		} else if canCommit {
+			if err2 := tx.Commit(); err2 != nil {
+				mq.Logger.Error(err2)
+			}
 		} else {
 			if err2 := tx.Rollback(); err2 != nil {
 				mq.Logger.Error(err2)
@@ -108,18 +115,21 @@ func (mq *SqlMQ) handle(ctx context.Context, cancel func(), tx *sql.Tx, msg Mess
 			// Reduce the rate that `EarliestMessage` got the lock and consume this message again.
 			time.Sleep(100 * time.Millisecond)
 		}
+	} else {
+		canCommit = true
+		mq.markFail(tx, msg, time.Minute)
 	}
 	return
 }
 func (mq *SqlMQ) markFail(db DBOrTx, msg Message, retryAfter time.Duration) {
 	if retryAfter >= 0 {
-		if err := mq.Table.MarkRetry(mq.DB, msg, retryAfter); err != nil {
+		if err := mq.Table.MarkRetry(db, msg, retryAfter); err != nil {
 			mq.Logger.Error(err)
 		} else {
 			mq.TriggerConsume()
 		}
 	} else {
-		if err := mq.Table.MarkGivenUp(mq.DB, msg); err != nil {
+		if err := mq.Table.MarkGivenUp(db, msg); err != nil {
 			mq.Logger.Error(err)
 		}
 	}
@@ -148,4 +158,18 @@ func (mq *SqlMQ) getWaitTime() (idleWait, errorWait time.Duration) {
 		errorWait = time.Minute
 	}
 	return
+}
+
+func (mq *SqlMQ) clean() {
+	for {
+		var cleaned int64
+		var err error
+		mq.Logger.Record(func(ctx context.Context) error {
+			cleaned, err = mq.Table.CleanMessages(mq.DB)
+			return err
+		}, nil, func(f *logger.Fields) {
+			f.With("cleaned", cleaned)
+		})
+		time.Sleep(mq.CleanInterval)
+	}
 }
