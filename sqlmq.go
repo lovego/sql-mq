@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lovego/logger"
+	"github.com/lovego/sleep"
 )
 
 type SqlMQ struct {
@@ -33,8 +34,8 @@ type SqlMQ struct {
 	queues map[string]Handler
 	mutex  sync.RWMutex
 
-	// trigger consume right now
-	consumeNotify chan struct{}
+	sleep sleep.Sleep // sleep instance for consuming loop.
+	debug bool
 }
 
 type DBOrTx interface {
@@ -113,7 +114,7 @@ func (mq *SqlMQ) Register(queueName string, handler Handler) error {
 	mq.mutex.RUnlock()
 
 	mq.Table.SetQueues(queues)
-	mq.TriggerConsume()
+	mq.NotifyConsumeAt(time.Now(), "queue regitered")
 	return nil
 }
 
@@ -133,11 +134,9 @@ func (mq *SqlMQ) handlerOf(msg Message) (Handler, error) {
 	return handler, nil
 }
 
-func (mq *SqlMQ) TriggerConsume() {
-	select {
-	case mq.consumeNotify <- struct{}{}:
-	default:
-	}
+// notify mq that there are messages to be consumed at a time.
+func (mq *SqlMQ) NotifyConsumeAt(at time.Time, event interface{}) {
+	mq.sleep.AwakeAtEalier(at, event)
 }
 
 // Produce a meesage. tx can be nil.
@@ -152,8 +151,12 @@ func (mq *SqlMQ) Produce(tx *sql.Tx, msg Message) error {
 	if err := mq.Table.ProduceMessage(db, msg); err != nil {
 		return err
 	}
-	mq.TriggerConsume()
+	mq.NotifyConsumeAt(msg.ConsumeAt(), "produce")
 	return nil
+}
+
+func (mq *SqlMQ) Debug(debug bool) {
+	mq.debug = debug
 }
 
 func (mq *SqlMQ) validate() error {

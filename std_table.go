@@ -156,10 +156,11 @@ func (table *StdTable) MarkSuccess(tx *sql.Tx, message Message) error {
 	)
 	ctx, cancel := sqlTimeout()
 	defer cancel()
-	if _, err := tx.ExecContext(ctx, sql); err != nil {
+	if result, err := tx.ExecContext(ctx, sql); err != nil {
 		return errs.Trace(err)
+	} else {
+		return checkAffectedOne(result)
 	}
-	return nil
 }
 
 func (table *StdTable) MarkRetry(db DBOrTx, message Message, retryAfter time.Duration) error {
@@ -174,10 +175,11 @@ func (table *StdTable) MarkRetry(db DBOrTx, message Message, retryAfter time.Dur
 	)
 	ctx, cancel := sqlTimeout()
 	defer cancel()
-	if _, err := db.ExecContext(ctx, sql); err != nil {
+	if result, err := db.ExecContext(ctx, sql); err != nil {
 		return errs.Trace(err)
+	} else {
+		return checkAffectedOne(result)
 	}
-	return nil
 }
 
 func (table *StdTable) MarkGivenUp(db DBOrTx, message Message) error {
@@ -192,10 +194,11 @@ func (table *StdTable) MarkGivenUp(db DBOrTx, message Message) error {
 	)
 	ctx, cancel := sqlTimeout()
 	defer cancel()
-	if _, err := db.ExecContext(ctx, sql); err != nil {
+	if result, err := db.ExecContext(ctx, sql); err != nil {
 		return errs.Trace(err)
+	} else {
+		return checkAffectedOne(result)
 	}
-	return nil
 }
 
 // if ProduceMessage runs succussfully, message id is set message(which is *StdMessage).
@@ -261,6 +264,15 @@ func (table *StdTable) Name() string {
 
 func sqlTimeout() (context.Context, func()) {
 	return context.WithTimeout(context.Background(), 10*time.Second)
+}
+
+func checkAffectedOne(result sql.Result) error {
+	if n, err := result.RowsAffected(); err != nil {
+		return errs.Trace(err)
+	} else if n != 1 {
+		return errs.Tracef("affected %d rows", n)
+	}
+	return nil
 }
 
 // quote a string, removing all zero byte('\000') in it.

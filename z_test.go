@@ -6,51 +6,27 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	_ "github.com/lib/pq"
+	"github.com/lovego/logger"
 )
 
+var testDB = getDB()
+var testMQ = recreateSqlMQ()
+
 func ExampleSqlMQ() {
-	db := getDB()
-	if _, err := db.Exec("DROP TABLE IF EXISTS sqlmq"); err != nil {
+	testMQ.Debug(true)
+	if err := testMQ.Register("test", testHandler); err != nil {
 		panic(err)
 	}
-	mq := &SqlMQ{
-		DB:            db,
-		Table:         NewStdTable(db, "sqlmq", time.Hour),
-		CleanInterval: time.Hour,
-	}
 
-	mq.Register("test", func(ctx context.Context, tx *sql.Tx, msg Message) (time.Duration, bool, error) {
-		m := msg.(*StdMessage)
-		var data string
-		if err := json.Unmarshal(m.Data.([]byte), &data); err != nil {
-			return 0, true, err
-		}
-		m.Data = data
-		fmt.Println(data, m.TryCount)
-		switch m.Data {
-		case "success":
-			return 0, true, nil
-		case "retry":
-			switch m.TryCount {
-			case 0:
-				return time.Second, false, errors.New("error happened")
-			case 1:
-				return time.Second, true, errors.New("error happened")
-			default:
-				return 0, true, nil
-			}
-		default:
-			return -1, false, errors.New("given up")
-		}
-	})
-	produce(mq, "success")
-	produce(mq, "retry")
-	produce(mq, "given up")
+	produce(testMQ, "success")
+	produce(testMQ, "retry")
+	produce(testMQ, "given up")
 
-	go mq.Consume()
+	go testMQ.Consume()
 	time.Sleep(5 * time.Second)
 	// Output:
 	// success 0
@@ -60,12 +36,58 @@ func ExampleSqlMQ() {
 	// retry 2
 }
 
+func testHandler(ctx context.Context, tx *sql.Tx, msg Message) (time.Duration, bool, error) {
+	m := msg.(*StdMessage)
+	var data string
+	if err := json.Unmarshal(m.Data.([]byte), &data); err != nil {
+		return 0, true, err
+	}
+	m.Data = data
+	fmt.Println(data, m.TryCount)
+	switch m.Data {
+	case "success":
+		return 0, true, nil
+	case "retry":
+		switch m.TryCount {
+		case 0:
+			return time.Second, false, errors.New("error happened")
+		case 1:
+			return time.Second, true, errors.New("error happened")
+		default:
+			return 0, true, nil
+		}
+	default:
+		return -1, false, errors.New("given up")
+	}
+}
+
 func getDB() *sql.DB {
 	db, err := sql.Open("postgres", "postgres://postgres:postgres@localhost/postgres?sslmode=disable")
 	if err != nil {
 		panic(err)
 	}
 	return db
+}
+
+func recreateSqlMQ() *SqlMQ {
+	if _, err := testDB.Exec("DROP TABLE IF EXISTS sqlmq"); err != nil {
+		panic(err)
+	}
+	return getSqlMQ()
+}
+
+func getSqlMQ() *SqlMQ {
+	logFile, err := os.Create("log.json")
+	if err != nil {
+		panic(err)
+	}
+
+	return &SqlMQ{
+		DB:            testDB,
+		Table:         NewStdTable(testDB, "sqlmq", time.Hour),
+		Logger:        logger.New(logFile),
+		CleanInterval: time.Hour,
+	}
 }
 
 func produce(mq *SqlMQ, data string) {
