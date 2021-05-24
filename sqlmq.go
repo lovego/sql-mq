@@ -94,7 +94,7 @@ func (mq *SqlMQ) Register(queueName string, handler Handler) error {
 	existingHandler := mq.queues[queueName]
 	mq.mutex.RUnlock()
 	if existingHandler != nil {
-		return fmt.Errorf("queue %s aready registered", queueName)
+		return fmt.Errorf("queue %s already registered", queueName)
 	}
 
 	mq.mutex.Lock()

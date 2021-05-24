@@ -17,7 +17,7 @@ func ExampleSqlMQ_Register() {
 	fmt.Println(testMQ.Register("test3", noopHandler))
 	// Output:
 	// <nil>
-	// queue test3 aready registered
+	// queue test3 already registered
 }
 
 func ExampleSqlMQ_Produce() {
