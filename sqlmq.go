@@ -18,6 +18,10 @@ type SqlMQ struct {
 	Table  Table
 	Logger *logger.Logger
 
+	// The max number of messages to be consumed concurrently.
+	// If ConsumeConcurrency <= 0, the default value 10 is used.
+	ConsumeConcurrency int
+	consumeConcurrency chan struct{}
 	// If no message is available for consuming, wait how long before try to fetch message again.
 	// If IdleWait <= 0, the default value one minute is used.
 	IdleWait time.Duration

@@ -201,7 +201,7 @@ func (table *StdTable) MarkGivenUp(db DBOrTx, message Message) error {
 	}
 }
 
-// if ProduceMessage runs succussfully, message id is set message(which is *StdMessage).
+// if ProduceMessage runs succussfully, message id is set in message(which is *StdMessage).
 func (table *StdTable) ProduceMessage(db DBOrTx, message Message) error {
 	msg := message.(*StdMessage)
 	jsonData, ok := msg.Data.([]byte)

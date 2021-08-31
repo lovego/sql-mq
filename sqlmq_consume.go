@@ -55,8 +55,10 @@ func (mq *SqlMQ) consume(idleWait, errorWait time.Duration) time.Duration {
 }
 
 func (mq *SqlMQ) consumeOne(idleWait time.Duration) (wait time.Duration, err error) {
+	mq.concurrencyLimit() <- struct{}{}
 	tx, cancel, err := mq.beginTx()
 	if err != nil {
+		<-mq.concurrencyLimit()
 		return
 	}
 
@@ -71,11 +73,13 @@ func (mq *SqlMQ) consumeOne(idleWait time.Duration) (wait time.Duration, err err
 			mq.Logger.Error(err2)
 		}
 		cancel()
+		<-mq.concurrencyLimit()
 		return
 	}
 
 	var retryAfter time.Duration
 	var handleErr error
+
 	go mq.Logger.Record(func(ctx context.Context) error {
 		retryAfter, handleErr = mq.handle(ctx, cancel, tx, msg)
 		return handleErr
@@ -84,6 +88,7 @@ func (mq *SqlMQ) consumeOne(idleWait time.Duration) (wait time.Duration, err err
 		if handleErr != nil {
 			f.With("retryAfter", retryAfter.String())
 		}
+		<-mq.concurrencyLimit()
 	})
 
 	return
@@ -133,7 +138,9 @@ func (mq *SqlMQ) handle(ctx context.Context, cancel func(), tx *sql.Tx, msg Mess
 	return
 }
 
-func (mq *SqlMQ) markFail(db DBOrTx, msg Message, retryAfter time.Duration, notifyConsume bool) time.Time {
+func (mq *SqlMQ) markFail(
+	db DBOrTx, msg Message, retryAfter time.Duration, notifyConsume bool,
+) time.Time {
 	if retryAfter >= 0 {
 		if err := mq.Table.MarkRetry(db, msg, retryAfter); err != nil {
 			mq.Logger.Error(err)
@@ -173,6 +180,17 @@ func (mq *SqlMQ) getWaitTime() (idleWait, errorWait time.Duration) {
 		errorWait = time.Minute
 	}
 	return
+}
+
+func (mq *SqlMQ) concurrencyLimit() chan struct{} {
+	if mq.consumeConcurrency == nil {
+		n := mq.ConsumeConcurrency
+		if n <= 0 {
+			n = 10
+		}
+		mq.consumeConcurrency = make(chan struct{}, n)
+	}
+	return mq.consumeConcurrency
 }
 
 func (mq *SqlMQ) clean() {
