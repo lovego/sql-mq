@@ -74,7 +74,8 @@ CREATE TABLE IF NOT EXISTS %s (
 
 func createIndex(db *sql.DB, name string) {
 	var createSql = fmt.Sprintf(
-		`CREATE INDEX CONCURRENTLY IF NOT EXISTS %s_retry_at ON %s (retry_at)`, strings.Replace(name, ".", "_", 1), name,
+		`CREATE INDEX CONCURRENTLY IF NOT EXISTS %s_queue_status_retry_at ON %s (queue, status, retry_at)`,
+		strings.Replace(name, ".", "_", 1), name,
 	)
 	ctx, cancel := sqlTimeout()
 	defer cancel()
