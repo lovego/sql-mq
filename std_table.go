@@ -22,13 +22,13 @@ const (
 )
 
 type StdMessage struct {
-	Id        int64
-	Queue     string
-	Data      interface{}
-	Status    string
-	CreatedAt time.Time
-	TryCount  uint16
-	RetryAt   time.Time
+	Id         int64
+	Queue      string      // quene name
+	Data       interface{} // data of any type
+	Status     string
+	CreatedAt  time.Time
+	TriedCount uint16    // how many times have tried already.
+	RetryAt    time.Time // next retry at when.
 }
 
 func (msg *StdMessage) QueueName() string {
@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS %s (
 	queue         text         NOT NULL,
 	status        text         NOT NULL,
 	created_at    timestamptz  NOT NULL,
-	try_count     smallint     NOT NULL,
+	tried_count     smallint     NOT NULL,
 	retry_at      timestamptz  NOT NULL,
 	data          jsonb        NOT NULL
 );
@@ -106,7 +106,7 @@ func (table *StdTable) EarliestMessage(tx *sql.Tx) (Message, error) {
 	ctx, cancel := sqlTimeout()
 	defer cancel()
 	if err := tx.QueryRowContext(ctx, querysql).Scan(
-		&row.Id, &row.Queue, &row.Data, &row.Status, &row.CreatedAt, &row.TryCount, &row.RetryAt,
+		&row.Id, &row.Queue, &row.Data, &row.Status, &row.CreatedAt, &row.TriedCount, &row.RetryAt,
 	); err == sql.ErrNoRows {
 		return nil, nil
 	} else if err != nil {
@@ -124,7 +124,7 @@ func (table *StdTable) getEarliestMessageSql() string {
 		}
 		sort.Strings(queues)
 		querySql := fmt.Sprintf(`
-		SELECT id, queue, data, status, created_at, try_count, retry_at
+		SELECT id, queue, data, status, created_at, tried_count, retry_at
 		FROM %s
 		WHERE queue IN (%s) AND status = '%s'
 		ORDER BY retry_at
@@ -148,7 +148,7 @@ func (table *StdTable) getEarliestMessageSql() string {
 func (table *StdTable) MarkSuccess(tx *sql.Tx, message Message) error {
 	sql := fmt.Sprintf(`
 	UPDATE %s
-	SET status = '%s', try_count = try_count+1, retry_at = '%s'
+	SET status = '%s', tried_count = tried_count+1, retry_at = '%s'
 	WHERE id = %d
 	`,
 		table.name,
@@ -167,7 +167,7 @@ func (table *StdTable) MarkSuccess(tx *sql.Tx, message Message) error {
 func (table *StdTable) MarkRetry(db DBOrTx, message Message, retryAfter time.Duration) error {
 	sql := fmt.Sprintf(`
 	UPDATE %s
-	SET try_count = try_count + 1,  retry_at = '%s'
+	SET tried_count = tried_count + 1,  retry_at = '%s'
 	WHERE id = %d
 	`,
 		table.name,
@@ -186,7 +186,7 @@ func (table *StdTable) MarkRetry(db DBOrTx, message Message, retryAfter time.Dur
 func (table *StdTable) MarkGivenUp(db DBOrTx, message Message) error {
 	sql := fmt.Sprintf(`
 	UPDATE %s
-	SET status = '%s', try_count = try_count + 1, retry_at = '%s'
+	SET status = '%s', tried_count = tried_count + 1, retry_at = '%s'
 	WHERE id = %d
 	`,
 		table.name,
@@ -226,14 +226,14 @@ func (table *StdTable) ProduceMessage(db DBOrTx, message Message) error {
 
 	sql := fmt.Sprintf(`
 	INSERT INTO %s
-		(queue, data, status, created_at, try_count, retry_at)
+		(queue, data, status, created_at, tried_count, retry_at)
 	VALUES
 	    (%s,    %s,   %s,     '%s',       %d,        '%s')
 	RETURNING id
 	`,
 		table.name,
 		quote(msg.Queue), quote(string(jsonData)), quote(msg.Status),
-		msg.CreatedAt.Format(rfc3339Micro), msg.TryCount, msg.RetryAt.Format(rfc3339Micro),
+		msg.CreatedAt.Format(rfc3339Micro), msg.TriedCount, msg.RetryAt.Format(rfc3339Micro),
 	)
 	ctx, cancel := sqlTimeout()
 	defer cancel()

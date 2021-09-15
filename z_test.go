@@ -43,12 +43,12 @@ func testHandler(ctx context.Context, tx *sql.Tx, msg Message) (time.Duration, b
 		return 0, true, err
 	}
 	m.Data = data
-	fmt.Println(data, m.TryCount)
+	fmt.Println(data, m.TriedCount)
 	switch m.Data {
 	case "success":
 		return 0, true, nil
 	case "retry":
-		switch m.TryCount {
+		switch m.TriedCount {
 		case 0:
 			return time.Second, false, errors.New("error happened")
 		case 1:
