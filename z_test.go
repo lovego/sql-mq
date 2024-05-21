@@ -62,7 +62,7 @@ func testHandler(ctx context.Context, tx *sql.Tx, msg Message) (time.Duration, b
 }
 
 func getDB() *sql.DB {
-	db, err := sql.Open("postgres", "postgres://postgres:postgres@localhost/postgres?sslmode=disable")
+	db, err := sql.Open("postgres", "postgres://develop:@localhost/postgres?sslmode=disable")
 	if err != nil {
 		panic(err)
 	}

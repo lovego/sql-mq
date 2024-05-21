@@ -39,32 +39,47 @@ func (msg *StdMessage) ConsumeAt() time.Time {
 	return msg.RetryAt
 }
 
+func (msg *StdMessage) TableSql(tableName string) string {
+	return fmt.Sprintf(`
+CREATE TABLE IF NOT EXISTS %s (
+	id            bigserial    NOT NULL PRIMARY KEY,
+	queue         text         NOT NULL,
+	status        text         NOT NULL,
+	created_at    timestamptz  NOT NULL,
+	tried_count   smallint     NOT NULL,
+	retry_at      timestamptz  NOT NULL,
+	data          jsonb        NOT NULL
+);
+`, tableName)
+}
+
+func (msg *StdMessage) TableIndexSql(tableName string) string {
+	return fmt.Sprintf(
+		`CREATE INDEX CONCURRENTLY IF NOT EXISTS %s_queue_status_retry_at ON %s (queue, status, retry_at)`,
+		strings.Replace(tableName, ".", "_", 1), tableName,
+	)
+}
+
 // NewStdTable create a standard `sqlmq.Table` instance.
 // db: db use to create table and index.
 // name: database table name.
 // keep: keep a successfully consumed message for how long before delete it.
-func NewStdTable(db *sql.DB, name string, keep time.Duration) *StdTable {
-	createTable(db, name)
-	createIndex(db, name)
+func NewStdTable(db *sql.DB, name string, keep time.Duration, msgs ...Message) *StdTable {
+	var msg Message
+	if len(msgs) == 0 || msgs[0] == nil {
+		msg = &StdMessage{}
+	} else {
+		msg = msgs[0]
+	}
+	createTable(db, msg.TableSql(name))
+	createIndex(db, msg.TableIndexSql(name))
 	if keep < 0 {
 		keep = 24 * time.Hour
 	}
 	return &StdTable{name: name, keep: keep}
 }
 
-func createTable(db *sql.DB, name string) {
-	var createSql = fmt.Sprintf(`
-CREATE TABLE IF NOT EXISTS %s (
-	id            bigserial    NOT NULL PRIMARY KEY,
-	queue         text         NOT NULL,
-	status        text         NOT NULL,
-	created_at    timestamptz  NOT NULL,
-	tried_count     smallint     NOT NULL,
-	retry_at      timestamptz  NOT NULL,
-	data          jsonb        NOT NULL
-);
-`, name,
-	)
+func createTable(db *sql.DB, createSql string) {
 	ctx, cancel := sqlTimeout()
 	defer cancel()
 	if _, err := db.ExecContext(ctx, createSql); err != nil {
@@ -72,11 +87,7 @@ CREATE TABLE IF NOT EXISTS %s (
 	}
 }
 
-func createIndex(db *sql.DB, name string) {
-	var createSql = fmt.Sprintf(
-		`CREATE INDEX CONCURRENTLY IF NOT EXISTS %s_queue_status_retry_at ON %s (queue, status, retry_at)`,
-		strings.Replace(name, ".", "_", 1), name,
-	)
+func createIndex(db *sql.DB, createSql string) {
 	ctx, cancel := sqlTimeout()
 	defer cancel()
 	if _, err := db.ExecContext(ctx, createSql); err != nil {

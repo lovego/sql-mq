@@ -18,7 +18,7 @@ func ExampleCreateTable() {
 	defer func() {
 		fmt.Println(recover() != nil)
 	}()
-	createTable(testDB, "")
+	createTable(testDB, "create table")
 	// Output:
 	// true
 }
@@ -27,7 +27,7 @@ func ExampleCreateIndex() {
 	defer func() {
 		fmt.Println(recover() != nil)
 	}()
-	createIndex(testDB, "")
+	createIndex(testDB, "create index")
 	// Output:
 	// true
 }
