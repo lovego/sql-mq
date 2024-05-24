@@ -53,11 +53,11 @@ CREATE TABLE IF NOT EXISTS %s (
 `, tableName)
 }
 
-func (msg *StdMessage) TableIndexSql(tableName string) string {
-	return fmt.Sprintf(
+func (msg *StdMessage) TableIndexSql(tableName string) []string {
+	return []string{fmt.Sprintf(
 		`CREATE INDEX CONCURRENTLY IF NOT EXISTS %s_queue_status_retry_at ON %s (queue, status, retry_at)`,
 		strings.Replace(tableName, ".", "_", 1), tableName,
-	)
+	)}
 }
 
 // NewStdTable create a standard `sqlmq.Table` instance.
@@ -72,7 +72,7 @@ func NewStdTable(db *sql.DB, name string, keep time.Duration, msgs ...Message) *
 		msg = msgs[0]
 	}
 	createTable(db, msg.TableSql(name))
-	createIndex(db, msg.TableIndexSql(name))
+	createIndex(db, msg.TableIndexSql(name)...)
 	if keep < 0 {
 		keep = 24 * time.Hour
 	}
@@ -87,11 +87,13 @@ func createTable(db *sql.DB, createSql string) {
 	}
 }
 
-func createIndex(db *sql.DB, createSql string) {
+func createIndex(db *sql.DB, createSqls ...string) {
 	ctx, cancel := sqlTimeout()
 	defer cancel()
-	if _, err := db.ExecContext(ctx, createSql); err != nil {
-		panic(time.Now().Format(time.RFC3339Nano) + " " + err.Error())
+	for i := range createSqls {
+		if _, err := db.ExecContext(ctx, createSqls[i]); err != nil {
+			panic(time.Now().Format(time.RFC3339Nano) + " " + err.Error())
+		}
 	}
 }
 

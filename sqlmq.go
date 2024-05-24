@@ -79,7 +79,7 @@ type Table interface {
 type Message interface {
 	QueueName() string
 	TableSql(tableName string) string
-	TableIndexSql(tableName string) string
+	TableIndexSql(tableName string) []string
 	// At which time the message should be consumed(either first time or retry).
 	ConsumeAt() time.Time
 }
