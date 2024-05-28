@@ -158,7 +158,7 @@ func (table *StdTable) EarliestMessage(tx *sql.Tx) (Message, error) {
 	row := StdMessage{}
 	querysql := table.getEarliestMessageSql()
 	ctx, cancel := sqlTimeout()
-	defer cancel()s
+	defer cancel()
 	if err := tx.QueryRowContext(ctx, querysql).Scan(
 		&row.Id, &row.Queue, &row.Data, &row.Status, &row.CreatedAt, &row.TriedCount, &row.RetryAt,
 	); err == sql.ErrNoRows {
