@@ -80,6 +80,9 @@ type Message interface {
 	QueueName() string
 	TableSql(tableName string) string
 	TableIndexSql(tableName string) []string
+	ProduceSql(tableName string) (string, error)
+	GetId() int64
+	SetId(id int64)
 	// At which time the message should be consumed(either first time or retry).
 	ConsumeAt() time.Time
 }

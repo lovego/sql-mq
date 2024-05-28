@@ -35,6 +35,14 @@ func (msg *StdMessage) QueueName() string {
 	return msg.Queue
 }
 
+func (msg *StdMessage) GetId() int64 {
+	return msg.Id
+}
+
+func (msg *StdMessage) SetId(id int64) {
+	msg.Id = id
+}
+
 func (msg *StdMessage) ConsumeAt() time.Time {
 	return msg.RetryAt
 }
@@ -58,6 +66,39 @@ func (msg *StdMessage) TableIndexSql(tableName string) []string {
 		`CREATE INDEX CONCURRENTLY IF NOT EXISTS %s_queue_status_retry_at ON %s (queue, status, retry_at)`,
 		strings.Replace(tableName, ".", "_", 1), tableName,
 	)}
+}
+
+func (msg *StdMessage) ProduceSql(tableName string) (string, error) {
+	jsonData, ok := msg.Data.([]byte)
+	if !ok {
+		if data, err := json.Marshal(msg.Data); err != nil {
+			return "", err
+		} else {
+			jsonData = []byte(data)
+		}
+	}
+
+	if msg.Status == "" {
+		msg.Status = statusWaiting
+	}
+	if msg.CreatedAt.IsZero() {
+		msg.CreatedAt = time.Now()
+	}
+	if msg.RetryAt.IsZero() {
+		msg.RetryAt = msg.CreatedAt
+	}
+
+	return fmt.Sprintf(`
+	INSERT INTO %s
+		(queue, data, status, created_at, tried_count, retry_at)
+	VALUES
+	    (%s,    %s,   %s,     '%s',       %d,        '%s')
+	RETURNING id
+	`,
+		tableName,
+		quote(msg.Queue), quote(string(jsonData)), quote(msg.Status),
+		msg.CreatedAt.Format(rfc3339Micro), msg.TriedCount, msg.RetryAt.Format(rfc3339Micro),
+	), nil
 }
 
 // NewStdTable create a standard `sqlmq.Table` instance.
@@ -117,7 +158,7 @@ func (table *StdTable) EarliestMessage(tx *sql.Tx) (Message, error) {
 	row := StdMessage{}
 	querysql := table.getEarliestMessageSql()
 	ctx, cancel := sqlTimeout()
-	defer cancel()
+	defer cancel()s
 	if err := tx.QueryRowContext(ctx, querysql).Scan(
 		&row.Id, &row.Queue, &row.Data, &row.Status, &row.CreatedAt, &row.TriedCount, &row.RetryAt,
 	); err == sql.ErrNoRows {
@@ -166,7 +207,7 @@ func (table *StdTable) MarkSuccess(tx *sql.Tx, message Message) error {
 	`,
 		table.name,
 		statusDone, time.Now().Format(rfc3339Micro),
-		message.(*StdMessage).Id,
+		message.GetId(),
 	)
 	ctx, cancel := sqlTimeout()
 	defer cancel()
@@ -185,7 +226,7 @@ func (table *StdTable) MarkRetry(db DBOrTx, message Message, retryAfter time.Dur
 	`,
 		table.name,
 		time.Now().Add(retryAfter).Format(rfc3339Micro),
-		message.(*StdMessage).Id,
+		message.GetId(),
 	)
 	ctx, cancel := sqlTimeout()
 	defer cancel()
@@ -204,7 +245,7 @@ func (table *StdTable) MarkGivenUp(db DBOrTx, message Message) error {
 	`,
 		table.name,
 		statusGivenUp, time.Now().Format(rfc3339Micro),
-		message.(*StdMessage).Id,
+		message.GetId(),
 	)
 	ctx, cancel := sqlTimeout()
 	defer cancel()
@@ -215,44 +256,19 @@ func (table *StdTable) MarkGivenUp(db DBOrTx, message Message) error {
 	}
 }
 
-// if ProduceMessage runs succussfully, message id is set in message(which is *StdMessage).
+// if ProduceMessage runs succussfully, message id is set in message.
 func (table *StdTable) ProduceMessage(db DBOrTx, message Message) error {
-	msg := message.(*StdMessage)
-	jsonData, ok := msg.Data.([]byte)
-	if !ok {
-		if data, err := json.Marshal(msg.Data); err != nil {
-			return err
-		} else {
-			jsonData = []byte(data)
-		}
+	sql, err := message.ProduceSql(table.name)
+	if err != nil {
+		return err
 	}
-
-	if msg.Status == "" {
-		msg.Status = statusWaiting
-	}
-	if msg.CreatedAt.IsZero() {
-		msg.CreatedAt = time.Now()
-	}
-	if msg.RetryAt.IsZero() {
-		msg.RetryAt = msg.CreatedAt
-	}
-
-	sql := fmt.Sprintf(`
-	INSERT INTO %s
-		(queue, data, status, created_at, tried_count, retry_at)
-	VALUES
-	    (%s,    %s,   %s,     '%s',       %d,        '%s')
-	RETURNING id
-	`,
-		table.name,
-		quote(msg.Queue), quote(string(jsonData)), quote(msg.Status),
-		msg.CreatedAt.Format(rfc3339Micro), msg.TriedCount, msg.RetryAt.Format(rfc3339Micro),
-	)
 	ctx, cancel := sqlTimeout()
 	defer cancel()
-	if err := db.QueryRowContext(ctx, sql).Scan(&msg.Id); err != nil {
+	var id int64
+	if err := db.QueryRowContext(ctx, sql).Scan(&id); err != nil {
 		return errs.Trace(err)
 	}
+	message.SetId(id)
 	return nil
 }
 
