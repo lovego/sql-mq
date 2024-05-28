@@ -14,11 +14,11 @@ import (
 )
 
 const (
-	statusWaiting = "waiting"
-	statusDone    = "done"
-	statusGivenUp = "givenUp"
+	StatusWaiting = "waiting"
+	StatusDone    = "done"
+	StatusGivenUp = "givenUp"
 
-	rfc3339Micro = "2006-01-02T15:04:05.999999Z07:00"
+	Rfc3339Micro = "2006-01-02T15:04:05.999999Z07:00"
 )
 
 type StdMessage struct {
@@ -79,7 +79,7 @@ func (msg *StdMessage) ProduceSql(tableName string) (string, error) {
 	}
 
 	if msg.Status == "" {
-		msg.Status = statusWaiting
+		msg.Status = StatusWaiting
 	}
 	if msg.CreatedAt.IsZero() {
 		msg.CreatedAt = time.Now()
@@ -96,8 +96,8 @@ func (msg *StdMessage) ProduceSql(tableName string) (string, error) {
 	RETURNING id
 	`,
 		tableName,
-		quote(msg.Queue), quote(string(jsonData)), quote(msg.Status),
-		msg.CreatedAt.Format(rfc3339Micro), msg.TriedCount, msg.RetryAt.Format(rfc3339Micro),
+		Quote(msg.Queue), Quote(string(jsonData)), Quote(msg.Status),
+		msg.CreatedAt.Format(Rfc3339Micro), msg.TriedCount, msg.RetryAt.Format(Rfc3339Micro),
 	), nil
 }
 
@@ -174,7 +174,7 @@ func (table *StdTable) getEarliestMessageSql() string {
 	if table.earliestMessageSql == "" {
 		var queues []string
 		for _, queue := range table.queues {
-			queues = append(queues, quote(queue))
+			queues = append(queues, Quote(queue))
 		}
 		sort.Strings(queues)
 		querySql := fmt.Sprintf(`
@@ -185,7 +185,7 @@ func (table *StdTable) getEarliestMessageSql() string {
 		LIMIT 1
 		FOR UPDATE SKIP LOCKED
 		`,
-			table.name, strings.Join(queues, ","), statusWaiting,
+			table.name, strings.Join(queues, ","), StatusWaiting,
 		)
 		table.mutex.RUnlock()
 
@@ -206,7 +206,7 @@ func (table *StdTable) MarkSuccess(tx *sql.Tx, message Message) error {
 	WHERE id = %d
 	`,
 		table.name,
-		statusDone, time.Now().Format(rfc3339Micro),
+		StatusDone, time.Now().Format(Rfc3339Micro),
 		message.GetId(),
 	)
 	ctx, cancel := sqlTimeout()
@@ -225,7 +225,7 @@ func (table *StdTable) MarkRetry(db DBOrTx, message Message, retryAfter time.Dur
 	WHERE id = %d
 	`,
 		table.name,
-		time.Now().Add(retryAfter).Format(rfc3339Micro),
+		time.Now().Add(retryAfter).Format(Rfc3339Micro),
 		message.GetId(),
 	)
 	ctx, cancel := sqlTimeout()
@@ -244,7 +244,7 @@ func (table *StdTable) MarkGivenUp(db DBOrTx, message Message) error {
 	WHERE id = %d
 	`,
 		table.name,
-		statusGivenUp, time.Now().Format(rfc3339Micro),
+		StatusGivenUp, time.Now().Format(Rfc3339Micro),
 		message.GetId(),
 	)
 	ctx, cancel := sqlTimeout()
@@ -277,7 +277,7 @@ func (table *StdTable) CleanMessages(db *sql.DB) (int64, error) {
 	DELETE FROM %s
 	WHERE status = '%s' AND retry_at < '%s'
 	`,
-		table.name, statusDone, time.Now().Add(-table.keep).Format(rfc3339Micro),
+		table.name, StatusDone, time.Now().Add(-table.keep).Format(Rfc3339Micro),
 	)
 	if result, err := db.Exec(sql); err != nil {
 		return 0, errs.Trace(err)
@@ -305,8 +305,8 @@ func checkAffectedOne(result sql.Result) error {
 	return nil
 }
 
-// quote a string, removing all zero byte('\000') in it.
-func quote(s string) string {
+// Quote a string, removing all zero byte('\000') in it.
+func Quote(s string) string {
 	s = strings.Replace(s, "'", "''", -1)
 	s = strings.Replace(s, "\000", "", -1)
 	return "'" + s + "'"
