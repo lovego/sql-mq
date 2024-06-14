@@ -85,6 +85,8 @@ type Message interface {
 	SetId(id int64)
 	// At which time the message should be consumed(either first time or retry).
 	ConsumeAt() time.Time
+	EarliestMessageSql(tableName string, queues []string) string
+	EarliestMessage(tx *sql.Tx, querysql string) (Message, error)
 }
 
 // On successful handling, a nil error should be returned, retryAfter and canCommit is ignored.

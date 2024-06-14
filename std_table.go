@@ -101,6 +101,32 @@ func (msg *StdMessage) ProduceSql(tableName string) (string, error) {
 	), nil
 }
 
+func (msg *StdMessage) EarliestMessageSql(tableName string, queues []string) string {
+	sort.Strings(queues)
+	return fmt.Sprintf(`
+	SELECT id, queue, data, status, created_at, tried_count, retry_at
+	FROM %s
+	WHERE queue IN (%s) AND status = '%s'
+	ORDER BY retry_at
+	LIMIT 1
+	FOR UPDATE SKIP LOCKED
+	`, tableName, strings.Join(queues, ","), StatusWaiting)
+}
+
+func (msg *StdMessage) EarliestMessage(tx *sql.Tx, querysql string) (Message, error) {
+	row := StdMessage{}
+	ctx, cancel := sqlTimeout()
+	defer cancel()
+	if err := tx.QueryRowContext(ctx, querysql).Scan(
+		&row.Id, &row.Queue, &row.Data, &row.Status, &row.CreatedAt, &row.TriedCount, &row.RetryAt,
+	); err == sql.ErrNoRows {
+		return nil, nil
+	} else if err != nil {
+		return nil, errs.Trace(err)
+	}
+	return &row, nil
+}
+
 // NewStdTable create a standard `sqlmq.Table` instance.
 // db: db use to create table and index.
 // name: database table name.
@@ -117,7 +143,7 @@ func NewStdTable(db *sql.DB, name string, keep time.Duration, msgs ...Message) *
 	if keep < 0 {
 		keep = 24 * time.Hour
 	}
-	return &StdTable{name: name, keep: keep}
+	return &StdTable{name: name, keep: keep, msg: msg}
 }
 
 func createTable(db *sql.DB, createSql string) {
@@ -145,6 +171,7 @@ type StdTable struct {
 	queues             []string
 	earliestMessageSql string
 	mutex              sync.RWMutex
+	msg                Message
 }
 
 func (table *StdTable) SetQueues(queues []string) {
@@ -155,18 +182,8 @@ func (table *StdTable) SetQueues(queues []string) {
 }
 
 func (table *StdTable) EarliestMessage(tx *sql.Tx) (Message, error) {
-	row := StdMessage{}
 	querysql := table.getEarliestMessageSql()
-	ctx, cancel := sqlTimeout()
-	defer cancel()
-	if err := tx.QueryRowContext(ctx, querysql).Scan(
-		&row.Id, &row.Queue, &row.Data, &row.Status, &row.CreatedAt, &row.TriedCount, &row.RetryAt,
-	); err == sql.ErrNoRows {
-		return nil, nil
-	} else if err != nil {
-		return nil, errs.Trace(err)
-	}
-	return &row, nil
+	return table.msg.EarliestMessage(tx, querysql)
 }
 
 func (table *StdTable) getEarliestMessageSql() string {
@@ -176,17 +193,9 @@ func (table *StdTable) getEarliestMessageSql() string {
 		for _, queue := range table.queues {
 			queues = append(queues, Quote(queue))
 		}
+
 		sort.Strings(queues)
-		querySql := fmt.Sprintf(`
-		SELECT id, queue, data, status, created_at, tried_count, retry_at
-		FROM %s
-		WHERE queue IN (%s) AND status = '%s'
-		ORDER BY retry_at
-		LIMIT 1
-		FOR UPDATE SKIP LOCKED
-		`,
-			table.name, strings.Join(queues, ","), StatusWaiting,
-		)
+		querySql := table.msg.EarliestMessageSql(table.name, queues)
 		table.mutex.RUnlock()
 
 		table.mutex.Lock()
