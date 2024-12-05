@@ -49,6 +49,8 @@ type DBOrTx interface {
 }
 
 type Table interface {
+	// return table name
+	Name() string
 	// Set the queues for EarliestMessage. This method must be concurrency safe.
 	SetQueues(queues []string)
 
