@@ -201,6 +201,7 @@ func (mq *SqlMQ) clean() {
 			cleaned, err = mq.Table.CleanMessages(mq.DB)
 			return err
 		}, nil, func(f *logger.Fields) {
+			f.With("table name", mq.Table.name)
 			f.With("cleaned", cleaned)
 		})
 		time.Sleep(mq.CleanInterval)
