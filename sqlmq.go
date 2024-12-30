@@ -38,6 +38,8 @@ type SqlMQ struct {
 	queues map[string]Handler
 	mutex  sync.RWMutex
 
+	defaultHandler Handler
+
 	sleep sleep.Sleep // sleep instance for consuming loop.
 	debug bool
 }
@@ -131,6 +133,10 @@ func (mq *SqlMQ) Register(queueName string, handler Handler) error {
 	return nil
 }
 
+func (mq *SqlMQ) SetDefaultHandler(handler Handler) {
+	mq.defaultHandler = handler
+}
+
 func (mq *SqlMQ) noQueues() bool {
 	mq.mutex.RLock()
 	defer mq.mutex.RUnlock()
@@ -142,6 +148,9 @@ func (mq *SqlMQ) handlerOf(msg Message) (Handler, error) {
 	defer mq.mutex.RUnlock()
 	handler := mq.queues[msg.QueueName()]
 	if handler == nil {
+		if mq.defaultHandler != nil {
+			return mq.defaultHandler, nil
+		}
 		return nil, errors.New("unknown queue: " + msg.QueueName())
 	}
 	return handler, nil
