@@ -102,15 +102,19 @@ func (msg *StdMessage) ProduceSql(tableName string) (string, error) {
 }
 
 func (msg *StdMessage) EarliestMessageSql(tableName string, queues []string) string {
-	sort.Strings(queues)
+	var cond string
+	if len(queues) > 0 {
+		sort.Strings(queues)
+		cond = fmt.Sprintf(" AND queue IN (%s)", strings.Join(queues, ","))
+	}
 	return fmt.Sprintf(`
 	SELECT id, queue, data, status, created_at, tried_count, retry_at
 	FROM %s
-	WHERE queue IN (%s) AND status = '%s'
+	WHERE status = '%s' %s
 	ORDER BY retry_at
 	LIMIT 1
 	FOR UPDATE SKIP LOCKED
-	`, tableName, strings.Join(queues, ","), StatusWaiting)
+	`, tableName, StatusWaiting, cond)
 }
 
 func (msg *StdMessage) EarliestMessage(tx *sql.Tx, querysql string) (Message, error) {
@@ -189,13 +193,13 @@ func (table *StdTable) EarliestMessage(tx *sql.Tx) (Message, error) {
 func (table *StdTable) getEarliestMessageSql() string {
 	table.mutex.RLock()
 	if table.earliestMessageSql == "" {
-		var queues []string
-		for _, queue := range table.queues {
-			queues = append(queues, Quote(queue))
-		}
+		// var queues []string
+		// for _, queue := range table.queues {
+		// 	queues = append(queues, Quote(queue))
+		// }
 
-		sort.Strings(queues)
-		querySql := table.msg.EarliestMessageSql(table.name, queues)
+		// sort.Strings(queues)
+		querySql := table.msg.EarliestMessageSql(table.name, nil)
 		table.mutex.RUnlock()
 
 		table.mutex.Lock()
